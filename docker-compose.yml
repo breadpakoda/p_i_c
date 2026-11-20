@@ -1,0 +1,63 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  ai-engine:
+    build:
+      context: .
+      dockerfile: ai_engine/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_STATE_URL: http://node-api:5000/internal/conversation-state
+      NODE_ALERT_URL: http://node-api:5000/security-alert
+      API_ALERT_URL: http://ai-engine:8000/layer3-alert
+      MONGODB_URI: mongodb://mongo:27017
+    depends_on:
+      node-api:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+  node-api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB: prompt_guard
+      AI_ENGINE_URL: http://ai-engine:8000
+      PORT: 5000
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    restart: unless-stopped
+    depends_on:
+      node-api:
+        condition: service_started
+    ports:
+      - "80:80"
+
+volumes:
+  mongo-data:
